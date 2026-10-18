@@ -1,0 +1,45 @@
+name: verify
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verus:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: read pinned Verus revision
+        id: pin
+        run: echo "rev=$(cat VERUS_VERSION)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          repository: verus-lang/verus
+          ref: ${{ steps.pin.outputs.rev }}
+          path: verus
+
+      - name: cache Verus build
+        id: cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            verus/source/target-verus
+            verus/source/z3
+            ~/.rustup/toolchains
+          key: verus-${{ runner.os }}-${{ steps.pin.outputs.rev }}
+
+      - name: build Verus
+        if: steps.cache.outputs.cache-hit != 'true'
+        working-directory: verus/source
+        run: |
+          rustup toolchain install "$(sed -n 's/^channel = "\(.*\)"/\1/p' ../rust-toolchain.toml)" \
+            --profile minimal -c rustc-dev,llvm-tools,rust-src
+          ./tools/get-z3.sh
+          bash -c 'source ../tools/activate && vargo build --release'
+
+      - name: verify
+        run: |
+          export PATH="$GITHUB_WORKSPACE/verus/source/target-verus/release:$PATH"
+          ./verify.sh
